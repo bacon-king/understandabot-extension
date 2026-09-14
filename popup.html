@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Understandabot.ai</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="card">
+    <header class="header">
+      <span class="brand">Understandabot<span class="brand-suffix">.ai</span></span>
+    </header>
+
+    <main class="body">
+      <h1 class="title">Toggle ON/OFF</h1>
+
+      <button id="toggle" class="toggle" role="switch" aria-checked="false" aria-label="Turn extension on or off">
+        <span class="toggle-thumb"></span>
+      </button>
+
+      <div class="status">
+        <span class="status-label">Current status</span>
+        <span id="statusValue" class="status-value">OFF</span>
+      </div>
+    </main>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
