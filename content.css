@@ -1,548 +1,127 @@
-(() => {
-  "use strict";
+.ub-popup {
+  position: absolute;
+  z-index: 999999;
+  width: 190px;
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  display: none;
+  flex-direction: column;
+  pointer-events: none;
+}
 
-  const HOVER_DELAY_MS = 150;
-  const RESULT_DELAY_MS = 1400;
-  const GAP = 10;
+.ub-popup * {
+  box-sizing: border-box;
+}
 
-  // YouTube video card elements
-  const VIDEO_CARD_SELECTOR = [
-    "ytd-rich-item-renderer",
-    "ytd-video-renderer",
-    "ytd-grid-video-renderer",
-    "ytd-compact-video-renderer",
-    "ytd-playlist-video-renderer"
-  ].join(",");
+.ub-header {
+  background: #26262a;
+  padding: 6px 10px;
+}
 
-  const THUMBNAIL_SELECTOR =
-    "ytd-thumbnail, ytd-playlist-thumbnail, #thumbnail";
+.ub-brand {
+  color: #f0433e;
+}
 
-  let enabled = false;
-  let popupEl = null;
-  let showTimer = null;
-  let resultTimer = null;
-  let currentTarget = null;
+.ub-brand-suffix {
+  color: #f5f5f5;
+}
 
-  console.log("[Understandabot] content script loaded:", location.href);
+.ub-body {
+  background: #4a4a4c;
+  padding: 10px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
 
-  // Create CSS directly inside YouTube.
-  // This means popup.css is not required for the popup itself.
-  function injectStyles() {
-    if (document.getElementById("understandabot-styles")) return;
+/* Loading state */
+.ub-loading-text {
+  margin: 0 0 10px;
+  color: #f5f5f5;
+  font-size: 11px;
+}
 
-    const style = document.createElement("style");
-    style.id = "understandabot-styles";
+.ub-spinner {
+  position: relative;
+  width: 30px;
+  height: 30px;
+}
 
-    style.textContent = `
-      .ub-popup {
-        position: absolute !important;
-        display: none;
-        flex-direction: column;
-        box-sizing: border-box;
-        width: 280px;
-        min-height: 120px;
-        padding: 0;
-        background: #fff;
-        color: #111;
-        border: 1px solid rgba(0,0,0,.15);
-        border-radius: 10px;
-        box-shadow: 0 8px 28px rgba(0,0,0,.25);
-        z-index: 2147483647 !important;
-        font-family: Arial, Helvetica, sans-serif;
-        overflow: hidden;
-        pointer-events: none;
-      }
+.ub-dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: #f0433e;
+  transform: rotate(calc(var(--i) * 45deg)) translate(0, -13px);
+  animation: ub-fade 1s linear infinite;
+  animation-delay: calc(var(--i) * -0.125s);
+}
 
-      .ub-header {
-        box-sizing: border-box;
-        padding: 12px 14px;
-        background: #f5f5f5;
-        border-bottom: 1px solid #e5e5e5;
-        font-size: 14px;
-        font-weight: 700;
-      }
-
-      .ub-brand-suffix {
-        font-weight: 400;
-        opacity: .65;
-      }
-
-      .ub-body {
-        padding: 14px;
-      }
-
-      .ub-loading-text,
-      .ub-section-title,
-      .ub-error-title,
-      .ub-error-message {
-        margin: 0;
-      }
-
-      .ub-loading-text,
-      .ub-section-title {
-        font-size: 14px;
-        font-weight: 600;
-      }
-
-      .ub-spinner {
-        display: flex;
-        justify-content: center;
-        gap: 5px;
-        margin-top: 16px;
-      }
-
-      .ub-dot {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background: #555;
-        animation: ub-bounce 900ms infinite ease-in-out;
-        animation-delay: calc(var(--i) * 90ms);
-      }
-
-      @keyframes ub-bounce {
-        0%, 60%, 100% {
-          transform: translateY(0);
-          opacity: .35;
-        }
-
-        30% {
-          transform: translateY(-6px);
-          opacity: 1;
-        }
-      }
-
-      .ub-rows {
-        margin-top: 10px;
-      }
-
-      .ub-row {
-        display: flex;
-        justify-content: space-between;
-        gap: 10px;
-        padding: 7px 0;
-        border-bottom: 1px solid #eee;
-        font-size: 12px;
-      }
-
-      .ub-cat-name {
-        font-weight: 600;
-      }
-
-      .ub-cat-confidence {
-        white-space: nowrap;
-        opacity: .65;
-      }
-
-      .ub-error-title {
-        color: #c00;
-        font-weight: 700;
-        font-size: 14px;
-      }
-
-      .ub-error-message {
-        margin-top: 7px;
-        font-size: 12px;
-      }
-    `;
-
-    (document.head || document.documentElement).appendChild(style);
+@keyframes ub-fade {
+  0% {
+    opacity: 1;
   }
-
-  function createPopup() {
-    injectStyles();
-
-    const el = document.createElement("div");
-
-    el.id = "understandabot-popup";
-    el.className = "ub-popup";
-
-    el.innerHTML = `
-      <div class="ub-header">
-        <span class="ub-brand">
-          Understandabot<span class="ub-brand-suffix">.ai</span>
-        </span>
-      </div>
-
-      <div class="ub-body"></div>
-    `;
-
-    document.body.appendChild(el);
-
-    return el;
+  100% {
+    opacity: 0.15;
   }
+}
 
-  // Find the thumbnail associated with whatever YouTube element
-  // the mouse is currently over.
-  //
-  // NOTE: YouTube's UI is built from custom elements (ytd-thumbnail,
-  // ytd-rich-item-renderer, etc.) that each attach their own shadow root.
-  // For a composed event like "mouseover", event.target gets *retargeted*
-  // to the outer shadow host once the event crosses a shadow boundary on
-  // its way up to a document-level listener — so event.target here is
-  // NOT the element the mouse is actually over. Likewise, .closest() and
-  // .querySelector() never cross shadow-root boundaries, so they can't
-  // find descendants that live inside a shadow root.
-  //
-  // event.composedPath() sidesteps all of this: it returns the full,
-  // real chain of elements the event passed through, shadow roots
-  // included, in innermost-to-outermost order.
-  function getThumbnailFromPath(path) {
-    if (!path || !path.length) return null;
+/* Result state */
+.ub-section-title {
+  margin: 0 0 8px;
+  color: #f5f5f5;
+  font-size: 11px;
+  align-self: flex-start;
+}
 
-    // Direct thumbnail, or an ancestor (within the composed path) that is one.
-    for (const node of path) {
-      if (node instanceof Element && node.matches(THUMBNAIL_SELECTOR)) {
-        return node;
-      }
-    }
+.ub-rows {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 
-    // Otherwise, find the enclosing video card in the path, then look
-    // for the thumbnail inside *that specific node's* shadow root (light
-    // DOM query as a fallback, in case a card renders without one).
-    for (const node of path) {
-      if (node instanceof Element && node.matches(VIDEO_CARD_SELECTOR)) {
-        const root = node.shadowRoot || node;
-        return root.querySelector(THUMBNAIL_SELECTOR);
-      }
-    }
+.ub-row {
+  background: #3a3a3d;
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
 
-    return null;
-  }
+.ub-cat-name {
+  color: #f5f5f5;
+  font-size: 10px;
+  text-align: left;
+}
 
-  // Shadow-DOM-aware "does root contain node" check, used to tell whether
-  // the mouse moved to something still inside the same thumbnail. Element.contains()
-  // can't answer this on its own because it doesn't cross shadow boundaries.
-  function containsAcrossShadow(root, node) {
-    let el = node;
+.ub-cat-confidence {
+  color: #b9b9bb;
+  font-size: 9px;
+  font-style: italic;
+  white-space: nowrap;
+}
 
-    while (el) {
-      if (el === root) return true;
+/* Error state */
+.ub-error-title {
+  margin: 0 0 6px;
+  color: #f5f5f5;
+  font-size: 12px;
+  font-weight: 600;
+}
 
-      const parent = el.parentElement;
-
-      if (parent) {
-        el = parent;
-        continue;
-      }
-
-      const rootNode = el.getRootNode?.();
-
-      el = rootNode instanceof ShadowRoot ? rootNode.host : null;
-    }
-
-    return false;
-  }
-
-  function renderLoading(body) {
-    body.innerHTML = `
-      <p class="ub-loading-text">
-        Predicting category...
-      </p>
-
-      <div class="ub-spinner">
-        ${Array.from(
-          { length: 8 },
-          (_, i) =>
-            `<span class="ub-dot" style="--i:${i}"></span>`
-        ).join("")}
-      </div>
-    `;
-  }
-
-  function renderResult(body) {
-    const categories = [
-      {
-        name: "Category Name",
-        confidence: 67
-      },
-      {
-        name: "Category Name",
-        confidence: 67
-      },
-      {
-        name: "Category Name",
-        confidence: 67
-      }
-    ];
-
-    body.innerHTML = `
-      <p class="ub-section-title">
-        Most likely category
-      </p>
-
-      <div class="ub-rows">
-        ${categories
-          .map(
-            c => `
-              <div class="ub-row">
-                <span class="ub-cat-name">
-                  ${c.name}
-                </span>
-
-                <span class="ub-cat-confidence">
-                  ${c.confidence}% confidence
-                </span>
-              </div>
-            `
-          )
-          .join("")}
-      </div>
-    `;
-  }
-
-  function positionPopup(target) {
-    if (
-      !popupEl ||
-      !target ||
-      !document.contains(target)
-    ) {
-      return;
-    }
-
-    const rect = target.getBoundingClientRect();
-    const popupRect = popupEl.getBoundingClientRect();
-
-    let left = rect.right + GAP;
-
-    // If there isn't enough room on the right,
-    // put the popup on the left.
-    if (
-      left + popupRect.width >
-      window.innerWidth - 8
-    ) {
-      left =
-        rect.left -
-        popupRect.width -
-        GAP;
-    }
-
-    // Keep it inside the viewport.
-    if (left < 8) {
-      left = Math.max(
-        8,
-        Math.min(
-          rect.left,
-          window.innerWidth -
-            popupRect.width -
-            8
-        )
-      );
-    }
-
-    let top = rect.top;
-
-    if (
-      top + popupRect.height >
-      window.innerHeight - 8
-    ) {
-      top =
-        window.innerHeight -
-        popupRect.height -
-        8;
-    }
-
-    top = Math.max(8, top);
-
-    popupEl.style.left =
-      `${left + window.scrollX}px`;
-
-    popupEl.style.top =
-      `${top + window.scrollY}px`;
-  }
-
-  function showPopupFor(target) {
-    if (
-      !enabled ||
-      !target ||
-      !document.contains(target)
-    ) {
-      return;
-    }
-
-    console.log(
-      "[Understandabot] showing popup for:",
-      target
-    );
-
-    if (!popupEl) {
-      popupEl = createPopup();
-    }
-
-    popupEl.style.display = "flex";
-
-    const body =
-      popupEl.querySelector(".ub-body");
-
-    renderLoading(body);
-
-    positionPopup(target);
-
-    clearTimeout(resultTimer);
-
-    resultTimer = setTimeout(() => {
-      if (
-        !enabled ||
-        currentTarget !== target ||
-        !document.contains(target)
-      ) {
-        return;
-      }
-
-      renderResult(body);
-      positionPopup(target);
-
-    }, RESULT_DELAY_MS);
-  }
-
-  function hidePopup() {
-    clearTimeout(showTimer);
-    clearTimeout(resultTimer);
-
-    currentTarget = null;
-
-    if (popupEl) {
-      popupEl.style.display = "none";
-    }
-  }
-
-  function setEnabled(value) {
-    enabled = Boolean(value);
-
-    console.log(
-      "[Understandabot] enabled:",
-      enabled
-    );
-
-    if (!enabled) {
-      hidePopup();
-    }
-  }
-
-  // Load saved ON/OFF state.
-  chrome.storage.local.get(
-    { enabled: false },
-    result => {
-      setEnabled(result.enabled);
-    }
-  );
-
-  // Listen for changes made by popup.js.
-  chrome.storage.onChanged.addListener(
-    (changes, area) => {
-      if (
-        area === "local" &&
-        changes.enabled
-      ) {
-        setEnabled(
-          changes.enabled.newValue
-        );
-      }
-    }
-  );
-
-  // YouTube dynamically creates video elements,
-  // so use mouseover instead of attaching listeners
-  // directly to existing thumbnails.
-  document.addEventListener(
-    "mouseover",
-    event => {
-      if (!enabled) return;
-
-      const thumbnail =
-        getThumbnailFromPath(
-          event.composedPath()
-        );
-
-      if (!thumbnail) return;
-
-      if (
-        thumbnail === currentTarget
-      ) {
-        return;
-      }
-
-      console.log(
-        "[Understandabot] hover detected:",
-        thumbnail
-      );
-
-      clearTimeout(showTimer);
-      clearTimeout(resultTimer);
-
-      currentTarget = thumbnail;
-
-      showTimer = setTimeout(() => {
-        if (
-          currentTarget === thumbnail &&
-          enabled
-        ) {
-          showPopupFor(thumbnail);
-        }
-      }, HOVER_DELAY_MS);
-
-    },
-    true
-  );
-
-  document.addEventListener(
-    "mouseout",
-    event => {
-      if (!enabled) return;
-
-      const thumbnail =
-        getThumbnailFromPath(
-          event.composedPath()
-        );
-
-      if (
-        !thumbnail ||
-        thumbnail !== currentTarget
-      ) {
-        return;
-      }
-
-      const related =
-        event.relatedTarget;
-
-      // Ignore movement between elements
-      // inside the same thumbnail (shadow-DOM-aware).
-      if (
-        related &&
-        containsAcrossShadow(thumbnail, related)
-      ) {
-        return;
-      }
-
-      hidePopup();
-    },
-    true
-  );
-
-  // Keep popup positioned correctly when
-  // scrolling through YouTube.
-  window.addEventListener(
-    "scroll",
-    () => {
-      if (
-        popupEl?.style.display === "flex" &&
-        currentTarget
-      ) {
-        positionPopup(currentTarget);
-      }
-    },
-    true
-  );
-
-  window.addEventListener(
-    "resize",
-    () => {
-      if (
-        popupEl?.style.display === "flex" &&
-        currentTarget
-      ) {
-        positionPopup(currentTarget);
-      }
-    }
-  );
-})();
+.ub-error-message {
+  margin: 0;
+  color: #d0d0d2;
+  font-size: 10px;
+}

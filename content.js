@@ -1,3 +1,4 @@
+//the input image size is 96p, no preprocessing aside from resizing the image, and the image is just simply classified into one of 5 categories: gaming, podcasts, science and education, sports, or vlogs.
 (() => {
   "use strict";
 
