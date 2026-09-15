@@ -241,6 +241,146 @@
   }
 
   // ============================================================
+  // ONNX MODEL PREDICTION
+  // ============================================================
+  let extractorSession = null;
+  let classifierSession = null;
+  const CATEGORIES = ["Gaming", "Podcasts", "Science & Education", "Sports", "Vlogs"];
+
+  ort.env.wasm.wasmPaths = chrome.runtime.getURL('wasm/');
+  ort.env.wasm.numThreads = 1;
+
+  async function loadModels() {
+
+    if (!chrome.runtime?.id) {
+      throw new Error("Extension was reloaded â€” refresh this YouTube tab and try again.");
+    }
+
+    if (!extractorSession) {
+      const extUrl = chrome.runtime.getURL("extractor.onnx");
+      extractorSession = await ort.InferenceSession.create(extUrl, { 
+        executionProviders: ['wasm'],
+        graphOptimizationLevel: 'all'
+      });
+    }
+    
+    if (!classifierSession) {
+      const clsUrl = chrome.runtime.getURL("classifier.onnx");
+      
+      classifierSession = await ort.InferenceSession.create(clsUrl, { 
+        executionProviders: ['wasm'] 
+      });
+    }
+  }
+
+  const IMAGENET_MEAN = [0.485, 0.456, 0.406];
+  const IMAGENET_STD = [0.229, 0.224, 0.225];
+
+  function preprocessCanvas(canvas) {
+    const size = 224;
+    const ctx = canvas.getContext("2d");
+    const { data } = ctx.getImageData(0, 0, size, size); // RGBA, Uint8ClampedArray
+
+    const plane = size * size;
+    const chw = new Float32Array(3 * plane);
+
+    for (let i = 0; i < plane; i++) {
+      const offset = i * 4;
+
+      chw[i] = (data[offset] / 255 - IMAGENET_MEAN[0]) / IMAGENET_STD[0];               // R
+      chw[plane + i] = (data[offset + 1] / 255 - IMAGENET_MEAN[1]) / IMAGENET_STD[1];    // G
+      chw[plane * 2 + i] = (data[offset + 2] / 255 - IMAGENET_MEAN[2]) / IMAGENET_STD[2]; // B
+      // data[offset + 3] is alpha â€” intentionally unused
+    }
+
+    return chw;
+  }
+
+  async function predictCategories(canvases) {
+    try {
+      await loadModels();
+    } catch (e) {
+      console.error("[Understandabot] Raw model load failure:", e);
+
+      throw new Error("Model Load Error: " + (e?.message || String(e)));
+    }
+
+    const allFeatures = [];
+
+    // Step 1: Run Extractor 5 times (Batch Size 1 to save memory)
+    for (let f = 0; f < 5; f++) {
+      const frameData = preprocessCanvas(canvases[f]);
+      const inputTensor = new ort.Tensor('float32', frameData, [1, 3, 224, 224]);
+      const results = await extractorSession.run({ input: inputTensor });
+      allFeatures.push(results.features.data); // Should be length 1280
+    }
+
+    // Step 2: Mean and Max Pooling in JavaScript
+    const featureLength = 1280;
+    const pooledData = new Float32Array(featureLength * 2); // 2560
+
+    for (let i = 0; i < featureLength; i++) {
+      let sum = 0;
+      let max = -Infinity;
+      for (let f = 0; f < 5; f++) {
+        const val = allFeatures[f][i];
+        sum += val;
+        if (val > max) max = val;
+      }
+      pooledData[i] = sum / 5;               // Mean pool first half
+      pooledData[featureLength + i] = max;   // Max pool second half
+    }
+
+    // Step 3: Run Classifier
+    const pooledTensor = new ort.Tensor('float32', pooledData, [1, 2560]);
+    const finalResults = await classifierSession.run({ pooled_features: pooledTensor });
+    const logits = finalResults.logits.data;
+
+    // Softmax
+    const maxLogit = Math.max(...logits);
+    const exps = logits.map(l => Math.exp(l - maxLogit));
+    const sumExps = exps.reduce((a, b) => a + b, 0);
+    const probs = exps.map(e => e / sumExps);
+
+    const predictions = CATEGORIES.map((name, index) => ({
+      name,
+      confidence: (probs[index] * 100).toFixed(1)
+    })).sort((a, b) => b.confidence - a.confidence);
+
+    return predictions.slice(0, 3);
+  }
+
+  function captureFrameAt(video, percent) {
+    return new Promise((resolve, reject) => {
+      const targetTime = video.duration * percent;
+      
+      // Fail if seeking takes longer than 3 seconds
+      const timeout = setTimeout(() => {
+        video.removeEventListener("seeked", onSeeked);
+        reject(new Error(`Seeking to ${percent * 100}% timed out.`));
+      }, 3000);
+
+      const onSeeked = () => {
+        clearTimeout(timeout);
+        video.removeEventListener("seeked", onSeeked);
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = 224;
+          canvas.height = 224;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(video, 0, 0, 224, 224);
+          resolve(canvas);
+        } catch (e) {
+          reject(new Error("Canvas draw failed: " + e.message));
+        }
+      };
+
+      video.addEventListener("seeked", onSeeked);
+      video.currentTime = targetTime;
+    });
+  }
+
+  // ============================================================
   // FIND VIDEO
   // ============================================================
 
@@ -362,33 +502,53 @@
     popupElement.style.display = "flex";
 
     renderLoading(body);
-
     positionPopup(video);
 
+    // Stop previous timers
     clearTimeout(resultTimer);
 
-    resultTimer = setTimeout(() => {
+    // Small delay to ensure the video element has loaded its metadata/duration
+    resultTimer = setTimeout(async () => {
+      if (!enabled || hoveredVideo !== video) return;
 
-      // Make sure the user is still hovering
-      // over the same video.
-      if (
-        !enabled ||
-        hoveredVideo !== video
-      ) {
+      // Ensure we are targeting the actual HTML5 video tag
+      const videoTag = video.querySelector('video') || video;
+      
+      if (!videoTag.duration || isNaN(videoTag.duration)) {
+        renderError(body, "Video preview not loaded.");
         return;
       }
 
-      // Simulated result for now â€” swap for the real
-      // prediction response (and call renderError(body, msg)
-      // on failure) once the backend call is wired up.
-      renderResult(body, [
-        { name: "Category Name", confidence: 67 },
-        { name: "Category Name", confidence: 67 },
-        { name: "Category Name", confidence: 67 }
-      ]);
+      try {
+        const originalTime = videoTag.currentTime;
+        const wasPaused = videoTag.paused;
 
-      positionPopup(video);
+        const percentages = [0.10, 0.25, 0.50, 0.75, 0.90];
+        const canvases = [];
 
+        for (const pct of percentages) {
+          const canvas = await captureFrameAt(videoTag, pct);
+          canvases.push(canvas);
+        }
+
+        // Restore video state
+        videoTag.currentTime = originalTime;
+        if (!wasPaused) videoTag.play();
+
+        const topCategories = await predictCategories(canvases);
+
+        if (enabled && hoveredVideo === video) {
+          renderResult(body, topCategories);
+          positionPopup(video);
+        }
+
+      } catch (error) {
+        // This will now print the exact trace in the background console
+        console.error("[Understandabot] Detailed Error:", error);
+        
+        // This will render the specific text in the popup UI
+        renderError(body, error.message);
+      }
     }, RESULT_DELAY);
   }
 

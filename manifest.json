@@ -18,10 +18,20 @@
   },
   "permissions": ["storage"],
   "host_permissions": ["*://*.youtube.com/*"],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "extractor.onnx",
+        "classifier.onnx",
+        "wasm/*"
+      ],
+      "matches": ["*://*.youtube.com/*"]
+    }
+  ],
   "content_scripts": [
     {
       "matches": ["*://*.youtube.com/*"],
-      "js": ["content.js"],
+      "js": ["ort.min.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }
