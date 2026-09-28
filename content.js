@@ -341,55 +341,62 @@
   // SHOW POPUP
   // ============================================================
 
+  function getVideoId(video) {
+    if (!video) return null;
+    const href = video.href || video.getAttribute("href") || "";
+    const match = href.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+    if (match) return match[1];
+    const shortMatch = href.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+    if (shortMatch) return shortMatch[1];
+
+    const innerLink = video.querySelector?.('a[href*="v="]');
+    if (innerLink) {
+      const innerMatch = (innerLink.href || "").match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+      if (innerMatch) return innerMatch[1];
+    }
+    return null;
+  }
+
   function showPopup(video) {
-
     if (!enabled) return;
-
     if (!video) return;
 
-    console.log(
-      "[Understandabot] SHOWING POPUP",
-      video
-    );
+    console.log("[Understandabot] SHOWING POPUP", video);
 
     const popupElement = createPopup();
-
-    const body =
-      popupElement.querySelector(
-        "#ub-popup-body"
-      );
+    const body = popupElement.querySelector("#ub-popup-body");
 
     popupElement.style.display = "flex";
-
     renderLoading(body);
-
     positionPopup(video);
 
-    clearTimeout(resultTimer);
-
-    resultTimer = setTimeout(() => {
-
-      // Make sure the user is still hovering
-      // over the same video.
-      if (
-        !enabled ||
-        hoveredVideo !== video
-      ) {
-        return;
-      }
-
-      // Simulated result for now â€” swap for the real
-      // prediction response (and call renderError(body, msg)
-      // on failure) once the backend call is wired up.
-      renderResult(body, [
-        { name: "Category Name", confidence: 67 },
-        { name: "Category Name", confidence: 67 },
-        { name: "Category Name", confidence: 67 }
-      ]);
-
+    const videoId = getVideoId(video);
+    if (!videoId) {
+      console.warn("[Understandabot] Could not extract video ID from element", video);
+      renderError(body, "Could not identify video.");
       positionPopup(video);
+      return;
+    }
 
-    }, RESULT_DELAY);
+    chrome.runtime.sendMessage(
+      {
+        type: "FETCH_FRAMES_AND_INFER",
+        videoId: videoId,
+        metadata: {
+          title: video.getAttribute("aria-label") || video.title || ""
+        }
+      },
+      response => {
+        if (!enabled || hoveredVideo !== video) return;
+
+        if (response && response.status === "SUCCESS" && response.predicted_tags) {
+          renderResult(body, response.predicted_tags.slice(0, 3));
+        } else {
+          renderError(body, response?.error || "Prediction unavailable.");
+        }
+        positionPopup(video);
+      }
+    );
   }
 
   // ============================================================
