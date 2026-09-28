@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Understandabot.ai",
   "version": "1.0.0",
-  "description": "Categorize YouTube videos automatically based on screenshots.",
+  "description": "Categorize YouTube videos automatically based on screenshots using Hybrid Client-Side ONNX and Cloud Inference.",
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -19,19 +19,44 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["storage"],
+  "permissions": [
+    "storage"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "model.onnx",
+        "ort.min.js",
+        "ort-wasm-simd.wasm",
+        "ort-wasm.wasm"
+      ],
+      "matches": [
+        "*://*.youtube.com/*"
+      ]
+    }
+  ],
   "host_permissions": [
     "*://*.youtube.com/*",
     "https://*.ytimg.com/*",
+    "https://*.onrender.com/*",
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*",
     "https://*/*"
   ],
   "content_scripts": [
     {
-      "matches": ["*://*.youtube.com/*"],
-      "js": ["content.js"],
-      "css": ["content.css"],
+      "matches": [
+        "*://*.youtube.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
       "run_at": "document_idle"
     }
   ]
